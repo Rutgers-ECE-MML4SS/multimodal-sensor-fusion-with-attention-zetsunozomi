@@ -37,7 +37,6 @@ def plot_fusion_comparison(
     accuracies = [results['results'][s]['accuracy'] for s in strategies]
     f1_scores = [results['results'][s]['f1_macro'] for s in strategies]
     eces = [results['results'][s]['ece'] for s in strategies]
-    inference_times = [results['results'][s]['inference_ms'] for s in strategies]
     
     # Create figure with subplots
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -68,15 +67,9 @@ def plot_fusion_comparison(
     for i, v in enumerate(eces):
         axes[1, 0].text(i, v + 0.005, f'{v:.3f}', ha='center', fontsize=10)
     
-    # Inference time comparison
-    axes[1, 1].bar(strategies, inference_times, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
-    axes[1, 1].set_ylabel('Inference Time (ms)', fontsize=12)
-    axes[1, 1].set_title('Inference Speed', fontsize=12)
-    for i, v in enumerate(inference_times):
-        axes[1, 1].text(i, v + 0.5, f'{v:.1f}', ha='center', fontsize=10)
-    
     plt.tight_layout()
-    
+
+
     # Save
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,10 +203,11 @@ def plot_calibration_diagram(
     predictions: np.ndarray,
     labels: np.ndarray,
     num_bins: int = 15,
-    save_path: str = 'analysis/calibration.png'
+    save_path: str = 'analysis/calibration.png',
+    json_path: str = None
 ):
     """
-    Plot reliability diagram for calibration.
+    Plot reliability diagram for calibration and save metrics to JSON.
     
     Args:
         confidences: (N,) predicted confidence scores
@@ -221,6 +215,7 @@ def plot_calibration_diagram(
         labels: (N,) ground truth labels
         num_bins: Number of confidence bins
         save_path: Where to save the plot
+        json_path: Where to save the calibration metrics JSON
     """
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     fig.suptitle('Model Calibration Analysis', fontsize=16, fontweight='bold')
@@ -236,30 +231,40 @@ def plot_calibration_diagram(
         if i == num_bins - 1:  # Include right edge in last bin
             bin_mask = (confidences >= bin_edges[i]) & (confidences <= bin_edges[i + 1])
         
-        if bin_mask.sum() > 0:
-            bin_conf = confidences[bin_mask].mean()
-            bin_acc = (predictions[bin_mask] == labels[bin_mask]).mean()
+        if np.any(bin_mask):
+            bin_conf = np.mean(confidences[bin_mask])
+            bin_acc = np.mean(predictions[bin_mask] == labels[bin_mask])
             bin_confidences.append(bin_conf)
             bin_accuracies.append(bin_acc)
-            bin_counts.append(bin_mask.sum())
+            bin_counts.append(np.sum(bin_mask))
         else:
             bin_confidences.append((bin_edges[i] + bin_edges[i + 1]) / 2)
             bin_accuracies.append(0)
             bin_counts.append(0)
     
     # Left plot: Reliability diagram
-    axes[0].bar(range(num_bins), bin_accuracies, width=0.8, alpha=0.7,
+    # Draw the perfect calibration diagonal line
+    axes[0].plot([0, 1], [0, 1], 'k--', alpha=0.8, label='Perfect Calibration', linewidth=2)
+    
+    # Draw accuracy histogram bars
+    bar_positions = np.linspace(0, 1, num_bins)
+    bar_width = 1.0 / num_bins
+    axes[0].bar(bar_positions, bin_accuracies, width=bar_width*0.8, alpha=0.7,
                 label='Accuracy', edgecolor='black')
-    axes[0].plot(range(num_bins), bin_confidences, 'ro-', linewidth=2,
+    
+    # Draw confidence line
+    axes[0].plot(bar_positions, bin_confidences, 'ro-', linewidth=2,
                 markersize=6, label='Confidence')
-    axes[0].plot([0, num_bins-1], [bin_accuracies[0], bin_accuracies[-1]],
-                'k--', alpha=0.5, label='Perfect Calibration')
-    axes[0].set_xlabel('Confidence Bin', fontsize=12)
-    axes[0].set_ylabel('Accuracy / Confidence', fontsize=12)
+    
+    axes[0].set_xlabel('Confidence', fontsize=12)
+    axes[0].set_ylabel('Accuracy', fontsize=12)
     axes[0].set_title('Reliability Diagram', fontsize=12)
-    axes[0].legend()
     axes[0].grid(True, alpha=0.3)
+    axes[0].set_xlim([0, 1.0])
     axes[0].set_ylim([0, 1.0])
+    
+    # Move legend to upper left corner
+    axes[0].legend(loc='upper left', bbox_to_anchor=(0, 1), ncol=1)
     
     # Right plot: Confidence histogram
     axes[1].hist(confidences, bins=50, alpha=0.7, edgecolor='black')
@@ -268,22 +273,41 @@ def plot_calibration_diagram(
     axes[1].set_title('Confidence Distribution', fontsize=12)
     axes[1].grid(True, alpha=0.3)
     
-    # Compute and display ECE
+    # Calculate and display ECE (moved to upper right corner)
     ece = sum([abs(bin_accuracies[i] - bin_confidences[i]) * bin_counts[i]
                for i in range(num_bins)]) / sum(bin_counts)
-    axes[0].text(0.05, 0.95, f'ECE: {ece:.4f}',
+    axes[0].text(0.95, 0.95, f'ECE: {ece:.4f}',
                 transform=axes[0].transAxes, fontsize=12,
-                verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
     
     plt.tight_layout()
     
-    # Save
+    # Save plot
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Calibration diagram saved to: {save_path}")
     plt.close()
+
+    # Save metrics to JSON
+    # Convert all NumPy arrays to Python lists and float32/float64 to Python float
+    metrics = {
+        "dataset": "pamap2",
+        "calibration_metrics": {
+            "ece": float(ece),
+            "bins": [float(x) for x in bin_edges[:-1]],  # Exclude the last edge
+            "accuracy_per_bin": [float(x) for x in bin_accuracies],
+            "confidence_per_bin": [float(x) for x in bin_confidences],
+            "samples_per_bin": [int(x) for x in bin_counts]
+        }
+    }
+    
+    json_path = Path('experiments/uncertainty.json')
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Calibration metrics saved to: {json_path}")
 
 
 def generate_all_plots(experiment_dir: str, output_dir: str):
@@ -344,7 +368,7 @@ def main():
     
     args = parser.parse_args()
     
-    generate_all_plots(args.experiment_dir, args.output_dir)
+    # generate_all_plots(args.experiment_dir, args.output_dir)
 
 
 if __name__ == '__main__':

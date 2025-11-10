@@ -1,0 +1,1 @@
+python src/train.py model.fusion_type=late

@@ -14,6 +14,9 @@ dataset:
   test_split: 0.15
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
   num_workers: 4  # Parallel data loading (0-4 for CPU)
+  num_classes: 24  # For pamap2
+                             # For mhad: 11
+                             # For cooking: 13
 
 # Model configuration
 model:
@@ -25,19 +28,26 @@ model:
   
   # Encoder configurations per modality
   encoders:
-    video:
-      type: frame  # frame, sequence, or mlp
-      input_dim: 512  # ResNet features
-      temporal_pooling: attention
-    imu:
-      type: sequence  # frame, sequence, or mlp
-      input_dim: 64  # 6-axis IMU (3 accel + 3 gyro) * statistical features
-      encoder_type: lstm  # For SequenceEncoder: lstm, gru, cnn
-      num_layers: 2
+    imu_hand:
+      input_dim: 17  # 3 accel + 3 gyro + 3 mag + ...
+      type: sequence
+      encoder_type: lstm
+    imu_chest:
+      input_dim: 17
+      type: sequence
+      encoder_type: lstm
+    imu_ankle:
+      input_dim: 17
+      type: sequence
+      encoder_type: lstm
+    heart_rate:
+      input_dim: 1
+      type: sequence
+      encoder_type: lstm
 
 # Training configuration
 training:
-  max_epochs: 100
+  max_epochs: 10
   learning_rate: 1e-3
   weight_decay: 1e-4
   optimizer: adamw

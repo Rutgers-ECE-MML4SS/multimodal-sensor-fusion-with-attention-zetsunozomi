@@ -20,7 +20,6 @@ from data import create_dataloaders
 from fusion import build_fusion_model
 from encoders import build_encoder
 
-
 class MultimodalFusionModule(pl.LightningModule):
     """
     PyTorch Lightning module for multimodal fusion training.
@@ -42,10 +41,19 @@ class MultimodalFusionModule(pl.LightningModule):
         modality_output_dims = {}
         
         for modality in config.dataset.modalities:
-            encoder_config = config.model.encoders.get(modality, {})
-            input_dim = encoder_config.get('input_dim', 64)
+            # Get encoder config with proper error if modality not found
+            if modality not in config.model.encoders:
+                raise ValueError(f"No encoder config found for modality: {modality}")
+            encoder_config = OmegaConf.to_container(config.model.encoders[modality], resolve=True)
+            
+            # Get input_dim with proper error if not specified
+            if 'input_dim' not in encoder_config:
+                raise ValueError(f"input_dim not specified for modality: {modality}")
+            input_dim = encoder_config['input_dim']
             output_dim = config.model.output_dim
             
+            encoder_config.pop('input_dim', None)
+            encoder_config.pop('type', None)
             self.encoders[modality] = build_encoder(
                 modality=modality,
                 input_dim=input_dim,
@@ -55,15 +63,20 @@ class MultimodalFusionModule(pl.LightningModule):
             modality_output_dims[modality] = output_dim
         
         # Build fusion model
-        # TODO: Students need to ensure their fusion implementation works here
-        self.fusion_model = build_fusion_model(
-            fusion_type=config.model.fusion_type,
-            modality_dims=modality_output_dims,
-            num_classes=config.dataset.get('num_classes', 11),
-            hidden_dim=config.model.hidden_dim,
-            num_heads=config.model.get('num_heads', 4),
-            dropout=config.model.dropout
-        )
+        # Students need to ensure their fusion implementation works here
+        fusion_params = {
+            'fusion_type': config.model.fusion_type,
+            'modality_dims': modality_output_dims,
+            'num_classes': config.dataset.get('num_classes', 11),
+            'hidden_dim': config.model.hidden_dim,
+            'dropout': config.model.dropout
+        }
+        
+        # Only add num_heads for non-early fusion types
+        if config.model.fusion_type == 'hybrid':
+            fusion_params['num_heads'] = config.model.get('num_heads', 4)
+            
+        self.fusion_model = build_fusion_model(**fusion_params)
         
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -93,7 +106,6 @@ class MultimodalFusionModule(pl.LightningModule):
         # TODO: Students ensure their fusion model returns correct format
         # For late fusion, may return tuple (logits, per_modality_logits)
         output = self.fusion_model(encoded_features, mask)
-        
         # Handle different fusion output formats
         if isinstance(output, tuple):
             logits = output[0]  # Late fusion returns (fused_logits, per_modality_logits)
@@ -108,7 +120,6 @@ class MultimodalFusionModule(pl.LightningModule):
         
         # Forward pass
         logits = self(features, mask)
-        
         # Compute loss
         loss = self.criterion(logits, labels)
         
@@ -128,7 +139,8 @@ class MultimodalFusionModule(pl.LightningModule):
         
         # Forward pass
         logits = self(features, mask)
-        
+
+
         # Compute loss
         loss = self.criterion(logits, labels)
         
@@ -245,6 +257,8 @@ def main(config: DictConfig):
     
     # Create dataloaders
     print("\nCreating dataloaders...")
+    # The split in config is not used in the following function.
+    # It's required to be pre-split, store in data/train, val, test folders.
     train_loader, val_loader, test_loader = create_dataloaders(
         dataset_name=config.dataset.name,
         data_dir=config.dataset.data_dir,
@@ -312,8 +326,17 @@ def main(config: DictConfig):
     print("\nTesting best model...")
     best_model_path = checkpoint_callback.best_model_path
     print(f"Loading best model from: {best_model_path}")
-    
-    trainer.test(model, test_loader, ckpt_path=best_model_path)
+
+    print(f"Manually loading checkpoint: {best_model_path}")
+
+    checkpoint = torch.load(best_model_path, map_location="cpu", weights_only=False)
+    hparams = checkpoint["hyper_parameters"]
+    print("Instantiating model from hyperparameters...")
+    model = MultimodalFusionModule(**hparams)
+    print("Loading state dict...")
+    model.load_state_dict(checkpoint["state_dict"])
+
+    print("Model loaded manually successfully.")
     
     # Save final results
     results = {

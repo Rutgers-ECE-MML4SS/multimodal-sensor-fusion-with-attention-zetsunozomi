@@ -1,3 +1,8 @@
+README_backup.md
+data/
+data_downsampling/
+origin_data/
+runs/
 # Python
 __pycache__/
 *.py[cod]

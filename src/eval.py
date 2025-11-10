@@ -11,6 +11,8 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from pathlib import Path
+import pathlib
+
 import json
 import argparse
 from tqdm import tqdm
@@ -287,10 +289,22 @@ def main():
                        help='Device to run on')
     
     args = parser.parse_args()
-    
     # Load model from checkpoint
+    
     print(f"Loading model from: {args.checkpoint}")
-    model = MultimodalFusionModule.load_from_checkpoint(args.checkpoint)
+    # model = MultimodalFusionModule.load_from_checkpoint(args.checkpoint)
+    # Due to PyTorch 2.6 safe loading, we implement manual loading
+    print(f"Manually loading checkpoint: {args.checkpoint}")
+
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    hparams = checkpoint["hyper_parameters"]
+    print("Instantiating model from hyperparameters...")
+    model = MultimodalFusionModule(**hparams)
+    print("Loading state dict...")
+    model.load_state_dict(checkpoint["state_dict"])
+
+    print("Model loaded manually successfully.")
+
     model.eval()
     model.to(args.device)
     

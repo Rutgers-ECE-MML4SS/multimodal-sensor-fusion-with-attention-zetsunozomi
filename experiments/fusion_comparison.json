@@ -1,0 +1,9 @@
+{
+  "dataset": "pamap2",
+  "modalities": ["imu_hand", "imu_chest","imu_ankle","heart_rate"],
+  "results": {
+    "early_fusion": {"accuracy": 0.9550523161888123, "f1_macro": 0.9502402394254089, "ece": 0.013009258545935154},
+    "late_fusion": {"accuracy": 0.953336775302887, "f1_macro": 0.9502622720343585, "ece": 0.012846475467085838},
+    "hybrid_fusion": {"accuracy": 0.9612283706665039, "f1_macro": 0.9586350083845425, "ece": 0.017492420971393585}
+  }
+}
